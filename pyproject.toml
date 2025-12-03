@@ -1,0 +1,22 @@
+[build-system]
+requires = ["setuptools>=63.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "curamentorworker"
+version = "0.1.0"
+description = "AWS FIFO queue worker that vectorizes S3 files locally via llama-cpp-python and persists metadata."
+readme = "README.md"
+requires-python = ">=3.11"
+license = {text = "MIT"}
+authors = [
+    {name = "Curamentor Worker Team", email = "dev@curamentor.com"},
+]
+dependencies = [
+    "boto3>=1.30.0",
+    "psycopg[binary]>=3.1",
+    "llama-cpp-python>=0.1.79",
+]
+
+[project.scripts]
+curamentor-worker = "curamentorworker.__main__:main"

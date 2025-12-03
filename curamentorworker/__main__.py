@@ -140,7 +140,7 @@ def run_test_vectorize(
         len(payload["metadata"]),
         len(payload["vector"]),
     )
-    logger.debug("Vector metadata payload: %s", payload)
+    logger.info("Vector metadata payload: %s", payload)
 
 
 if __name__ == "__main__":

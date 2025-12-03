@@ -55,6 +55,9 @@ def main() -> None:
             for message in messages:
                 msg_id = message.get("MessageId", "unknown")
                 logger.info("Handling message %s", msg_id)
+                receipt_handle = message.get("ReceiptHandle")
+                if receipt_handle:
+                    queue.extend_visibility(receipt_handle, 300)
                 processed = False
                 try:
                     processor.process_message(message)

@@ -33,5 +33,26 @@ class FIFOQueue:
 
     def delete_message(self, receipt_handle: str) -> None:
         """Remove a processed message from the queue."""
-        self._client.delete_message(QueueUrl=self._queue_url, ReceiptHandle=receipt_handle)
-        self._logger.debug("Deleted message from %s", self._queue_url)
+        try:
+            self._client.delete_message(QueueUrl=self._queue_url, ReceiptHandle=receipt_handle)
+        except self._client.exceptions.InvalidParameterValue as exc:
+            self._logger.debug("DeleteMessage got expired receipt: %s", exc)
+        else:
+            self._logger.debug("Deleted message from %s", self._queue_url)
+
+    def extend_visibility(self, receipt_handle: str, visibility_timeout: int) -> None:
+        """Extend the visibility timeout for a message while it is being processed."""
+        try:
+            self._client.change_message_visibility(
+                QueueUrl=self._queue_url,
+                ReceiptHandle=receipt_handle,
+                VisibilityTimeout=visibility_timeout,
+            )
+        except self._client.exceptions.InvalidParameterValue as exc:
+            self._logger.debug("change_message_visibility failed (likely expired): %s", exc)
+        else:
+            self._logger.debug(
+                "Extended visibility for message to %s seconds on %s",
+                visibility_timeout,
+                self._queue_url,
+            )

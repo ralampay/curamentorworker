@@ -18,6 +18,8 @@ dependencies = [
     "llama-cpp-python>=0.1.79",
     "openai>=1.0",
     "python-dotenv>=1.0",
+    "langchain>=1.0.0",
+    "pdfminer.six>=20230524",
 ]
 
 [project.scripts]

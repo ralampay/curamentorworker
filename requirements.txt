@@ -24,7 +24,9 @@ pyotp==2.9.0
 python-dateutil==2.9.0.post0
 python-dotenv==1.2.1
 PyYAML==6.0.3
+langchain==1.0.0
 requests==2.32.5
+pdfminer.six==20240720
 rich==14.2.0
 semver==3.0.4
 six==1.17.0

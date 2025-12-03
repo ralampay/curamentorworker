@@ -5,12 +5,18 @@ import os
 import tempfile
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Sequence
 
 import boto3
 import openai
 import psycopg
 from llama_cpp import Llama
+from pdfminer.high_level import extract_text as pdfminer_extract_text
+
+try:
+    from langchain.document_loaders import PyPDFLoader
+except ModuleNotFoundError:  # pragma: no cover - optional dependency
+    PyPDFLoader = None
 
 from .config import Settings
 
@@ -55,8 +61,12 @@ class VectorizationProcessor:
 
         self._logger.info("Processing %s/%s", bucket, key)
         local_path = self._download(bucket, key)
-        vector_response = self._vectorize(local_path)
-        self._persist_document(key, payload, vector_response, publication_id)
+        chunk_payloads = self._vectorize(local_path)
+        if not chunk_payloads:
+            self._logger.warning("No chunks generated for %s", key)
+            os.remove(local_path)
+            return
+        self._persist_document(key, payload, chunk_payloads, publication_id)
         os.remove(local_path)
         self._logger.debug("Cleaned up %s", local_path)
 
@@ -74,7 +84,7 @@ class VectorizationProcessor:
         if not header.startswith(b"%PDF-"):
             raise ValueError("curamentorworker only supports PDF assets; got %r" % filepath)
 
-    def _vectorize(self, filepath: str) -> Dict[str, Any]:
+    def _vectorize(self, filepath: str) -> List[Dict[str, Any]]:
         """Generate embeddings using llama-cpp-python."""
         self._ensure_pdf(filepath)
         if self._use_local_embeddings:
@@ -89,38 +99,49 @@ class VectorizationProcessor:
                 filepath,
                 self._settings.openai_embedding_model,
             )
-        text = self._read_text(filepath)
+        text = self._extract_text_from_pdf(filepath)
+        chunks = self._chunk_text(text)
+        payloads: List[Dict[str, Any]] = []
+        if not chunks:
+            return payloads
         if self._use_local_embeddings:
-            response = self._model.embed(text)
+            for index, chunk in enumerate(chunks, start=1):
+                response = self._model.embed(chunk)
+                payloads.append(
+                    {
+                        "chunk_index": index,
+                        "chunk_text": self._sanitize_text(chunk),
+                        "embedding": self._extract_embedding(response),
+                    }
+                )
         else:
             self._logger.debug("Calling OpenAI embeddings endpoint %s", self._settings.openai_embedding_model)
-            chunks = self._chunk_text(text)
-            if len(chunks) == 1:
-                response = self._openai_client.embeddings.create(
+            for index, chunk in enumerate(chunks, start=1):
+                self._logger.debug("Sending chunk %s/%s to OpenAI embeddings", index, len(chunks))
+                chunk_response = self._openai_client.embeddings.create(
                     model=self._settings.openai_embedding_model,
-                    input=chunks[0],
+                    input=chunk,
                 )
-            else:
-                chunk_embeddings: List[List[float]] = []
-                for index, chunk in enumerate(chunks, start=1):
-                    self._logger.debug("Sending chunk %s/%s to OpenAI embeddings", index, len(chunks))
-                    chunk_response = self._openai_client.embeddings.create(
-                        model=self._settings.openai_embedding_model,
-                        input=chunk,
-                    )
-                    chunk_embeddings.append(chunk_response.data[0].embedding)
-                averaged = self._average_embeddings(chunk_embeddings)
-                self._logger.debug("Averaged %s chunk embeddings for %s", len(chunk_embeddings), filepath)
-                response = {"data": [{"embedding": averaged}]}
-        embedding_vector = self._extract_embedding(response)
-        self._logger.debug("Generated embedding of length %s", len(embedding_vector))
-        return response
+                payloads.append(
+                    {
+                        "chunk_index": index,
+                        "chunk_text": self._sanitize_text(chunk),
+                        "embedding": self._extract_embedding(chunk_response),
+                    }
+                )
+        if payloads:
+            self._logger.debug("Generated %s chunk embeddings for %s", len(payloads), filepath)
+        return payloads
 
     def _chunk_text(self, text: str, chunk_size: int = _EMBEDDING_CHUNK_SIZE) -> List[str]:
         """Split text into fixed-size blocks for OpenAI embeddings."""
         if not text:
             return []
         return [text[i : i + chunk_size] for i in range(0, len(text), chunk_size)]
+
+    def _sanitize_text(self, text: str) -> str:
+        """Strip characters that cannot be stored in text fields."""
+        return text.replace("\x00", "")
 
     def _average_embeddings(self, embeddings: List[List[float]]) -> List[float]:
         if not embeddings:
@@ -140,9 +161,23 @@ class VectorizationProcessor:
             return response.data[0].embedding
         return response["data"][0]["embedding"]
 
-    def _read_text(self, filepath: str) -> str:
-        with open(filepath, "r", encoding="utf-8", errors="ignore") as handle:
-            return handle.read()
+    def _extract_text_from_pdf(self, filepath: str) -> str:
+        """Return normalized text extracted from a PDF."""
+        if PyPDFLoader:
+            try:
+                loader = PyPDFLoader(filepath)
+                documents = loader.load()
+                if documents:
+                    return "\n".join(doc.page_content for doc in documents if doc.page_content)
+                return ""
+            except Exception as exc:
+                self._logger.exception("LangChain PDF parsing failed for %s: %s", filepath, exc)
+        self._logger.debug("Falling back to pdfminer for %s", filepath)
+        try:
+            return pdfminer_extract_text(filepath) or ""
+        except Exception as exc:
+            self._logger.exception("pdfminer extraction failed for %s: %s", filepath, exc)
+            raise
 
     def create_vector_payload(
         self,
@@ -153,13 +188,13 @@ class VectorizationProcessor:
     ) -> Dict[str, Any]:
         """Return the embedding and metadata that would be inserted for a document."""
         self._logger.debug("Creating test vector payload for %s", filepath)
-        vector_response = self._vectorize(filepath)
+        chunk_payloads = self._vectorize(filepath)
 
         payload_publication_id = publication_id or metadata.get("publication_id")
         return {
             "key": key,
             "metadata": metadata,
-            "vector": vector_response["data"][0]["embedding"],
+            "chunks": chunk_payloads,
             "publication_id": payload_publication_id,
         }
 
@@ -167,13 +202,13 @@ class VectorizationProcessor:
         self,
         key: str,
         metadata: Dict[str, Any],
-        vector_response: Dict[str, Any],
+        chunk_payloads: Sequence[Dict[str, Any]],
         publication_id: Optional[str],
     ) -> None:
         """Persist vector metadata to PostgreSQL."""
         self._logger.debug("Persisting document %s to the database", key)
-        vector = vector_response["data"][0]["embedding"]
         now = datetime.utcnow()
+        metadata_payload = self._sanitize_text(json.dumps(metadata))
         with psycopg.connect(
             host=self._settings.db_host,
             port=self._settings.db_port,
@@ -182,25 +217,23 @@ class VectorizationProcessor:
             password=self._settings.db_password,
         ) as conn:
             with conn.cursor() as cur:
-                cur.execute(
-                    """
-                    INSERT INTO publication_vectors (key, publication_id, metadata, vector, created_at, updated_at)
-                    VALUES (%s, %s, %s, %s, %s, %s)
-                    ON CONFLICT (key) DO UPDATE
-                    SET publication_id = EXCLUDED.publication_id,
-                        metadata = EXCLUDED.metadata,
-                        vector = EXCLUDED.vector,
-                        created_at = EXCLUDED.created_at,
-                        updated_at = EXCLUDED.updated_at""",
-                    (
-                        key,
-                        publication_id,
-                        json.dumps(metadata),
-                        vector,
-                        now,
-                        now,
-                    ),
-                )
+                for chunk in chunk_payloads:
+                    cur.execute(
+                        """
+                        INSERT INTO publication_vectors (key, publication_id, metadata, vector, chunk_index, chunk_text, created_at, updated_at)
+                        VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+                        """,
+                        (
+                            key,
+                            publication_id,
+                            metadata_payload,
+                            chunk["embedding"],
+                            chunk["chunk_index"],
+                            self._sanitize_text(chunk["chunk_text"]),
+                            now,
+                            now,
+                        ),
+                    )
         self._logger.info("Persisted %s to PostgreSQL", key)
 
     def _vector_exists(self, key: str) -> bool:

@@ -52,7 +52,7 @@ The worker logs verbosely to `stdout` and to `log/development.log` or `log/produ
 
 When `APP_ENV=development` and `LOCALSTACK_URL` is provided, the worker builds the queue address as `<LOCALSTACK_URL>/000000000000/<queue-name>` where the queue name comes from `AWS_SQS_QUEUE_NAME` (or, if that variable is unset, the final path segment of `AWS_SQS_QUEUE_URL`). In this mode the boto3 SQS client also uses `<LOCALSTACK_URL>` as its endpoint so polling happens locally instead of hitting live AWS.
 
-- Remote OpenAI embeddings automatically chunk large documents into 4k-character slices, average the resulting embeddings, and persist the combined vector so documents that otherwise exceed the model's context limit still succeed.
+- Remote OpenAI embeddings now chunk large documents into 4k-character slices and persist each chunk (text, index, vector) as its own `publication_vectors` row so oversized documents fit the token budget and the original chunks can be retrieved later. LangChain (`langchain.document_loaders.PyPDFLoader`) is now preferred to parse PDFs so `chunk_text` stores readable text, but a pdfminer fallback is used if LangChain is unavailable. The worker assumes `publication_vectors.key` is not unique so a document can create many chunk rows without conflict.
 
 ## Logging
 

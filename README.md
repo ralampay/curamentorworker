@@ -32,6 +32,8 @@ The worker logs verbosely to `stdout` and to `log/development.log` or `log/produ
 | `APP_ENV` | `development` or `production`; determines the log file and default log level. |
 | `AWS_REGION` | AWS region where your FIFO SQS queue and S3 bucket live. |
 | `AWS_SQS_QUEUE_URL` | Full URL of the AWS FIFO queue to consume. |
+| `AWS_SQS_QUEUE_NAME` | Name of the queue; used to build a LocalStack URL in development (falls back to the name segment of `AWS_SQS_QUEUE_URL`). |
+| `LOCALSTACK_URL` | Base endpoint for LocalStack; when running with `APP_ENV=development` this is used in place of the live `AWS_SQS_QUEUE_URL`. |
 | `S3_BUCKET_NAME` | Default S3 bucket name that payloads in the queue reference. |
 | `S3_PREFIX` | Optional key prefix prepended when downloading assets. |
 | `DB_HOST` | PostgreSQL host (required). |
@@ -40,9 +42,17 @@ The worker logs verbosely to `stdout` and to `log/development.log` or `log/produ
 | `DB_USER` | PostgreSQL username (required). |
 | `DB_PASSWORD` | PostgreSQL password (required). |
 | `LLAMA_MODEL_PATH` | Filesystem path to the `llama-cpp-python` GGML model file. |
+| `OPENAI_API_KEY` | API key for OpenAI if using hosted embeddings; required when `--local` is not passed. |
+| `OPENAI_API_BASE` | Optional base URL when pointing at OpenAI-compatible hosts. |
+| `OPENAI_API_VERSION` | Optional API version header override for OpenAI. |
+| `OPENAI_EMBEDDING_MODEL` | OpenAI model used for remote embeddings (default `text-embedding-ada-002`). |
 | `POLL_INTERVAL_SECONDS` | Seconds to wait with no messages before polling again (default `5`). |
 | `MAX_MESSAGES` | How many messages to fetch per batch (default `1`). |
 | `SQS_VISIBILITY_TIMEOUT` | Visibility timeout used when claiming messages (default `30`). |
+
+When `APP_ENV=development` and `LOCALSTACK_URL` is provided, the worker builds the queue address as `<LOCALSTACK_URL>/000000000000/<queue-name>` where the queue name comes from `AWS_SQS_QUEUE_NAME` (or, if that variable is unset, the final path segment of `AWS_SQS_QUEUE_URL`). In this mode the boto3 SQS client also uses `<LOCALSTACK_URL>` as its endpoint so polling happens locally instead of hitting live AWS.
+
+- Remote OpenAI embeddings automatically chunk large documents into 4k-character slices, average the resulting embeddings, and persist the combined vector so documents that otherwise exceed the model's context limit still succeed.
 
 ## Logging
 

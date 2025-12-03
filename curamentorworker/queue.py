@@ -13,7 +13,10 @@ class FIFOQueue:
     def __init__(self, settings: Settings, logger) -> None:
         self._logger = logger
         self._settings = settings
-        self._client = boto3.client("sqs", region_name=settings.aws_region)
+        client_kwargs = {"region_name": settings.aws_region}
+        if settings.sqs_endpoint_url:
+            client_kwargs["endpoint_url"] = settings.sqs_endpoint_url
+        self._client = boto3.client("sqs", **client_kwargs)
         self._queue_url = settings.sqs_queue_url
 
     def receive_messages(self) -> List[Dict[str, Any]]:

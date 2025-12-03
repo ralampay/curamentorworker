@@ -8,6 +8,7 @@ venv/
 .venv/
 env/
 .env/
+.env
 
 # Distribution / packaging
 dist/
@@ -39,3 +40,4 @@ log/
 
 # Local configuration
 local_settings.py
+.env

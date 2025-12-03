@@ -3,6 +3,7 @@
 import json
 import os
 import tempfile
+from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
@@ -41,12 +42,15 @@ class VectorizationProcessor:
     def process_message(self, raw_message: Dict[str, Any]) -> None:
         """Main entry-point for an SQS message."""
         payload = json.loads(raw_message["Body"])
-        print(payload)
         bucket = payload.get("bucket") or self._settings.s3_bucket_name
         publication_id = payload.get("publication_id")
         key = payload["key"]
         if not bucket or not key:
             self._logger.error("Missing bucket or key in payload %s", payload)
+            return
+
+        if self._vector_exists(key):
+            self._logger.info("Skipping %s because it already has a vector", key)
             return
 
         self._logger.info("Processing %s/%s", bucket, key)
@@ -153,7 +157,7 @@ class VectorizationProcessor:
 
         payload_publication_id = publication_id or metadata.get("publication_id")
         return {
-            "s3_key": key,
+            "key": key,
             "metadata": metadata,
             "vector": vector_response["data"][0]["embedding"],
             "publication_id": payload_publication_id,
@@ -169,6 +173,7 @@ class VectorizationProcessor:
         """Persist vector metadata to PostgreSQL."""
         self._logger.debug("Persisting document %s to the database", key)
         vector = vector_response["data"][0]["embedding"]
+        now = datetime.utcnow()
         with psycopg.connect(
             host=self._settings.db_host,
             port=self._settings.db_port,
@@ -179,12 +184,33 @@ class VectorizationProcessor:
             with conn.cursor() as cur:
                 cur.execute(
                     """
-                    INSERT INTO publication_vectors (s3_key, publication_id, metadata, vector)
-                    VALUES (%s, %s, %s, %s)
-                    ON CONFLICT (s3_key) DO UPDATE
+                    INSERT INTO publication_vectors (key, publication_id, metadata, vector, created_at, updated_at)
+                    VALUES (%s, %s, %s, %s, %s, %s)
+                    ON CONFLICT (key) DO UPDATE
                     SET publication_id = EXCLUDED.publication_id,
                         metadata = EXCLUDED.metadata,
-                        vector = EXCLUDED.vector""",
-                    (key, publication_id, json.dumps(metadata), vector),
+                        vector = EXCLUDED.vector,
+                        created_at = EXCLUDED.created_at,
+                        updated_at = EXCLUDED.updated_at""",
+                    (
+                        key,
+                        publication_id,
+                        json.dumps(metadata),
+                        vector,
+                        now,
+                        now,
+                    ),
                 )
         self._logger.info("Persisted %s to PostgreSQL", key)
+
+    def _vector_exists(self, key: str) -> bool:
+        with psycopg.connect(
+            host=self._settings.db_host,
+            port=self._settings.db_port,
+            dbname=self._settings.db_name,
+            user=self._settings.db_user,
+            password=self._settings.db_password,
+        ) as conn:
+            with conn.cursor() as cur:
+                cur.execute("SELECT 1 FROM publication_vectors WHERE key = %s", (key,))
+                return cur.fetchone() is not None

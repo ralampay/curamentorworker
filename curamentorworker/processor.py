@@ -68,12 +68,12 @@ class VectorizationProcessor:
             return
         self._persist_document(key, payload, chunk_payloads, publication_id)
         os.remove(local_path)
-        self._logger.debug("Cleaned up %s", local_path)
+        self._logger.info("Cleaned up %s", local_path)
 
     def _download(self, bucket: str, key: str) -> str:
         dest = tempfile.NamedTemporaryFile(delete=False, suffix=os.path.splitext(key)[1] or ".bin")
         dest.close()
-        self._logger.debug("Downloading s3://%s/%s to %s", bucket, key, dest.name)
+        self._logger.info("Downloading s3://%s/%s to %s", bucket, key, dest.name)
         self._s3.download_file(bucket, key, dest.name)
         return dest.name
 
@@ -88,13 +88,13 @@ class VectorizationProcessor:
         """Generate embeddings using llama-cpp-python."""
         self._ensure_pdf(filepath)
         if self._use_local_embeddings:
-            self._logger.debug(
+            self._logger.info(
                 "Vectorizing %s with llama-cpp model %s",
                 filepath,
                 self._settings.llama_model_path,
             )
         else:
-            self._logger.debug(
+            self._logger.info(
                 "Vectorizing %s with OpenAI embedding %s",
                 filepath,
                 self._settings.openai_embedding_model,
@@ -115,9 +115,9 @@ class VectorizationProcessor:
                     }
                 )
         else:
-            self._logger.debug("Calling OpenAI embeddings endpoint %s", self._settings.openai_embedding_model)
+            self._logger.info("Calling OpenAI embeddings endpoint %s", self._settings.openai_embedding_model)
             for index, chunk in enumerate(chunks, start=1):
-                self._logger.debug("Sending chunk %s/%s to OpenAI embeddings", index, len(chunks))
+                self._logger.info("Sending chunk %s/%s to OpenAI embeddings", index, len(chunks))
                 chunk_response = self._openai_client.embeddings.create(
                     model=self._settings.openai_embedding_model,
                     input=chunk,
@@ -130,7 +130,7 @@ class VectorizationProcessor:
                     }
                 )
         if payloads:
-            self._logger.debug("Generated %s chunk embeddings for %s", len(payloads), filepath)
+            self._logger.info("Generated %s chunk embeddings for %s", len(payloads), filepath)
         return payloads
 
     def _chunk_text(self, text: str, chunk_size: int = _EMBEDDING_CHUNK_SIZE) -> List[str]:
@@ -172,7 +172,7 @@ class VectorizationProcessor:
                 return ""
             except Exception as exc:
                 self._logger.exception("LangChain PDF parsing failed for %s: %s", filepath, exc)
-        self._logger.debug("Falling back to pdfminer for %s", filepath)
+        self._logger.info("Falling back to pdfminer for %s", filepath)
         try:
             return pdfminer_extract_text(filepath) or ""
         except Exception as exc:
@@ -187,7 +187,7 @@ class VectorizationProcessor:
         publication_id: Optional[str] = None,
     ) -> Dict[str, Any]:
         """Return the embedding and metadata that would be inserted for a document."""
-        self._logger.debug("Creating test vector payload for %s", filepath)
+        self._logger.info("Creating test vector payload for %s", filepath)
         chunk_payloads = self._vectorize(filepath)
 
         payload_publication_id = publication_id or metadata.get("publication_id")
@@ -206,7 +206,7 @@ class VectorizationProcessor:
         publication_id: Optional[str],
     ) -> None:
         """Persist vector metadata to PostgreSQL."""
-        self._logger.debug("Persisting document %s to the database", key)
+        self._logger.info("Persisting document %s to the database", key)
         now = datetime.utcnow()
         metadata_payload = self._sanitize_text(json.dumps(metadata))
         with psycopg.connect(

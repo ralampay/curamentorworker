@@ -25,7 +25,7 @@ def main() -> None:
     if dotenv_loaded:
         logger.info("Loaded environment variables from %s", Path(".env").resolve())
     else:
-        logger.debug("No .env file found at %s", Path(".env").resolve())
+        logger.info("No .env file found at %s", Path(".env").resolve())
 
     if args.test_vectorize:
         run_test_vectorize(
@@ -48,7 +48,7 @@ def main() -> None:
         while True:
             messages = queue.receive_messages()
             if not messages:
-                logger.debug("No messages in queue; sleeping for %s seconds", settings.poll_interval_seconds)
+                logger.info("No messages in queue; sleeping for %s seconds", settings.poll_interval_seconds)
                 time.sleep(settings.poll_interval_seconds)
                 continue
 

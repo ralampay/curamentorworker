@@ -21,7 +21,7 @@ class FIFOQueue:
 
     def receive_messages(self) -> List[Dict[str, Any]]:
         """Pull messages from the AWS FIFO queue."""
-        self._logger.debug("Polling queue %s", self._queue_url)
+        self._logger.info("Polling queue %s", self._queue_url)
         response = self._client.receive_message(
             QueueUrl=self._queue_url,
             MaxNumberOfMessages=self._settings.max_messages,
@@ -36,9 +36,9 @@ class FIFOQueue:
         try:
             self._client.delete_message(QueueUrl=self._queue_url, ReceiptHandle=receipt_handle)
         except self._client.exceptions.InvalidParameterValue as exc:
-            self._logger.debug("DeleteMessage got expired receipt: %s", exc)
+            self._logger.info("DeleteMessage got expired receipt: %s", exc)
         else:
-            self._logger.debug("Deleted message from %s", self._queue_url)
+            self._logger.info("Deleted message from %s", self._queue_url)
 
     def extend_visibility(self, receipt_handle: str, visibility_timeout: int) -> None:
         """Extend the visibility timeout for a message while it is being processed."""
@@ -49,9 +49,9 @@ class FIFOQueue:
                 VisibilityTimeout=visibility_timeout,
             )
         except self._client.exceptions.InvalidParameterValue as exc:
-            self._logger.debug("change_message_visibility failed (likely expired): %s", exc)
+            self._logger.info("change_message_visibility failed (likely expired): %s", exc)
         else:
-            self._logger.debug(
+            self._logger.info(
                 "Extended visibility for message to %s seconds on %s",
                 visibility_timeout,
                 self._queue_url,

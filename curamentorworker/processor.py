@@ -19,6 +19,7 @@ except ModuleNotFoundError:  # pragma: no cover - optional dependency
     PyPDFLoader = None
 
 from .config import Settings
+from .s3_utils import apply_s3_prefix
 
 _EMBEDDING_CHUNK_SIZE = 4000
 
@@ -59,8 +60,9 @@ class VectorizationProcessor:
             self._logger.info("Skipping %s because it already has a vector", key)
             return
 
-        self._logger.info("Processing %s/%s", bucket, key)
-        local_path = self._download(bucket, key)
+        s3_key = self._prefixed_key(key)
+        self._logger.info("Processing %s/%s", bucket, s3_key)
+        local_path = self._download(bucket, s3_key)
         chunk_payloads = self._vectorize(local_path)
         if not chunk_payloads:
             self._logger.warning("No chunks generated for %s", key)
@@ -70,12 +72,19 @@ class VectorizationProcessor:
         os.remove(local_path)
         self._logger.info("Cleaned up %s", local_path)
 
-    def _download(self, bucket: str, key: str) -> str:
-        dest = tempfile.NamedTemporaryFile(delete=False, suffix=os.path.splitext(key)[1] or ".bin")
+    def _download(self, bucket: str, s3_key: str) -> str:
+        dest = tempfile.NamedTemporaryFile(
+            delete=False,
+            suffix=os.path.splitext(s3_key)[1] or ".bin",
+        )
         dest.close()
-        self._logger.info("Downloading s3://%s/%s to %s", bucket, key, dest.name)
-        self._s3.download_file(bucket, key, dest.name)
+        self._logger.info("Downloading s3://%s/%s to %s", bucket, s3_key, dest.name)
+        self._s3.download_file(bucket, s3_key, dest.name)
         return dest.name
+
+    def _prefixed_key(self, key: str) -> str:
+        """Return the configured S3 key after applying any optional prefix."""
+        return apply_s3_prefix(self._settings.s3_prefix, key)
 
     def _ensure_pdf(self, filepath: str) -> None:
         """Reject non-PDF files early by checking the file signature."""
